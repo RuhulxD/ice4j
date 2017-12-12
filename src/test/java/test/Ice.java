@@ -18,6 +18,9 @@
 package test;
 
 import java.beans.*;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.InetAddress;
 import java.util.*;
 import java.util.logging.*;
 
@@ -25,6 +28,7 @@ import org.ice4j.*;
 import org.ice4j.ice.*;
 import org.ice4j.ice.harvest.*;
 import org.ice4j.security.*;
+import org.ice4j.socket.IceSocketWrapper;
 
 /**
  * Simple ice4j testing scenario. The sample application would create and start
@@ -49,7 +53,7 @@ public class Ice
      * agent which is always started, of course).
      */
     private static final boolean START_CONNECTIVITY_ESTABLISHMENT_OF_REMOTE_PEER
-        = false;
+        = true;
 
     /**
      * Start time for debugging purposes.
@@ -115,7 +119,7 @@ public class Ice
 
         //Give processing enough time to finish. We'll System.exit() anyway
         //as soon as localAgent enters a final state.
-        Thread.sleep(60000);
+        //Thread.sleep(60000);
     }
 
     /**
@@ -163,8 +167,7 @@ public class Ice
                 }
 
                 logger.info("Printing the completed check lists:");
-                for(IceMediaStream stream : streams)
-                {
+                for (IceMediaStream stream : streams) {
                     String streamName = stream.getName();
                     logger.info("Check list for  stream: " + streamName);
                     //uncomment for a more verbose output
@@ -172,11 +175,29 @@ public class Ice
                 }
 
                 logger.info("Total ICE processing time to completion: "
-                    + (System.currentTimeMillis() - startTime));
-            }
-            else if(iceProcessingState == IceProcessingState.TERMINATED
-                    || iceProcessingState == IceProcessingState.FAILED)
-            {
+                        + (System.currentTimeMillis() - startTime));
+//            }
+//            else if(iceProcessingState == IceProcessingState.TERMINATED){
+//                Agent agent = (Agent)evt.getSource();
+                for (IceMediaStream stream : agent.getStreams()) {
+                    if (stream.getName().contains("audio")) {
+                        Component rtpComponent = stream.getComponent(org.ice4j.ice.Component.RTP);
+                        // We use IceSocketWrapper, but you can just use the UDP socket
+                        // The advantage is that you can change the protocol from UDP to TCP easily
+                        // Currently only UDP exists so you might not need to use the wrapper.
+                        IceSocketWrapper wrapper =  rtpComponent.getSocketWrapper();
+                        // Get information about remote address for packet settings
+                        TransportAddress ta = rtpComponent.getRemoteCandidates().get(0).getTransportAddress();
+                        InetAddress hostname;
+                        int port;
+                        hostname = ta.getAddress();
+                        port = ta.getPort();
+                        startReadThread(wrapper);
+                        startSendThread(wrapper, hostname, port);
+
+                    }
+                }
+            } else if (iceProcessingState == IceProcessingState.FAILED) {
                 /*
                  * Though the process will be instructed to die, demonstrate
                  * that Agent instances are to be explicitly prepared for
@@ -189,7 +210,65 @@ public class Ice
                 System.exit(0);
             }
         }
+        String getRandomStrings(int length) {
+        final String str = "0123456789";
+        StringBuilder buf = new StringBuilder();
+        do {
+            buf.append(str);
+        } while (buf.length() < length - str.length());
+        return buf.toString();
     }
+   
+    void startSendThread(final IceSocketWrapper wrapper, final InetAddress hostname, final int port){
+        logger.info("starting send thread.");        
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                DatagramPacket p = new DatagramPacket(new byte[1000],1000);
+                p.setAddress(hostname);
+                p.setPort(port);
+                while(true){
+                    try {
+                        p.setData(getRandomStrings(1000).getBytes());
+                        
+                        logger.info("Sending...."+new String(p.getData()));
+                        wrapper.send(p);
+                        Thread.sleep(1000);
+                        //logger.info("received->"+ p.getData());
+                    } catch (IOException ex) {
+                        Logger.getLogger(Ice.class.getName()).log(Level.SEVERE, null, ex);
+                    
+                    } catch (InterruptedException ex) {
+                        Logger.getLogger(Ice.class.getName()).log(Level.SEVERE, null, ex);
+                    }
+                }
+            }
+        });
+        t.start();
+    }
+    
+    void startReadThread(final IceSocketWrapper wrapper){
+        logger.info("starting read thread.");        
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                DatagramPacket p = new DatagramPacket(new byte[1000],1000);
+                while(true){
+                    try {
+                        logger.info("Waiting to receive->");
+                        wrapper.receive(p);
+                        logger.info("received->"+ new String(p.getData()));
+                    } catch (IOException ex) {
+                        Logger.getLogger(Ice.class.getName()).log(Level.SEVERE, null, ex);
+                    }
+                }
+            }
+        });
+        t.start();
+    }
+    }
+    
+    
 
     /**
      * Installs remote candidates in <tt>localAgent</tt>..
@@ -338,23 +417,24 @@ public class Ice
         if(harvesters == null)
         {
             // STUN
-            StunCandidateHarvester stunHarv = new StunCandidateHarvester(
-                new TransportAddress("stun.jitsi.net", 3478, Transport.UDP));
-            StunCandidateHarvester stun6Harv = new StunCandidateHarvester(
-                new TransportAddress("stun6.jitsi.net", 3478, Transport.UDP));
+//            StunCandidateHarvester stunHarv = new StunCandidateHarvester(
+//                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
+//            StunCandidateHarvester stun6Harv = new StunCandidateHarvester(
+//                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
 
-            agent.addCandidateHarvester(stunHarv);
-            agent.addCandidateHarvester(stun6Harv);
+//            agent.addCandidateHarvester(stunHarv);
+//            agent.addCandidateHarvester(stun6Harv);
 
             // TURN
             String[] hostnames = new String[]
                                  {
-                                    "stun.jitsi.net",
-                                    "stun6.jitsi.net"
+                                    "35.193.188.252"
+//                    ,
+//                                    "stun6.jitsi.net"
                                  };
             int port = 3478;
             LongTermCredential longTermCredential
-                = new LongTermCredential("guest", "anonymouspower!!");
+                = new LongTermCredential("ruhul1", "123456");
 
             for (String hostname : hostnames)
                 agent.addCandidateHarvester(
