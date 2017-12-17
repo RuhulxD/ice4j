@@ -76,6 +76,7 @@ public class Ice
         Agent remotePeer = createAgent(6060, false);
 
         localAgent.addStateChangeListener(new IceProcessingListener());
+        remotePeer.addStateChangeListener(new IceProcessingListener());
 
         //let them fight ... fights forge character.
         localAgent.setControlling(true);
@@ -108,8 +109,10 @@ public class Ice
         if (START_CONNECTIVITY_ESTABLISHMENT_OF_REMOTE_PEER)
             remotePeer.startConnectivityEstablishment();
 
+        IceMediaStream audioStream = localAgent.getStream("audio");
+        if(audioStream != null)
         logger.info("Local audio clist:\n"
-                        + localAgent.getStream("audio").getCheckList());
+                        + audioStream);
 
         IceMediaStream videoStream = localAgent.getStream("video");
 
@@ -119,7 +122,9 @@ public class Ice
 
         //Give processing enough time to finish. We'll System.exit() anyway
         //as soon as localAgent enters a final state.
-        //Thread.sleep(60000);
+        Thread.sleep(60000);
+        localAgent.free();
+        remotePeer.free();
     }
 
     /**
@@ -176,11 +181,11 @@ public class Ice
 
                 logger.info("Total ICE processing time to completion: "
                         + (System.currentTimeMillis() - startTime));
-//            }
-//            else if(iceProcessingState == IceProcessingState.TERMINATED){
-//                Agent agent = (Agent)evt.getSource();
+            }
+            else if(iceProcessingState == IceProcessingState.TERMINATED){
+                Agent agent = (Agent)evt.getSource();
                 for (IceMediaStream stream : agent.getStreams()) {
-                    if (stream.getName().contains("audio")) {
+                    if (stream.getName().contains("video") || stream.getName().contains("audio")) {
                         Component rtpComponent = stream.getComponent(org.ice4j.ice.Component.RTP);
                         // We use IceSocketWrapper, but you can just use the UDP socket
                         // The advantage is that you can change the protocol from UDP to TCP easily
@@ -207,7 +212,7 @@ public class Ice
 
                 logger.info("Total ICE processing time: "
                     + (System.currentTimeMillis() - startTime));
-                System.exit(0);
+               // System.exit(0);
             }
         }
         String getRandomStrings(int length) {
@@ -231,7 +236,7 @@ public class Ice
                     try {
                         p.setData(getRandomStrings(1000).getBytes());
                         
-                        logger.info("Sending...."+new String(p.getData()));
+                        logger.info("Sending...."+p.getAddress().toString()+":"+p.getPort());
                         wrapper.send(p);
                         Thread.sleep(1000);
                         //logger.info("received->"+ p.getData());
@@ -257,7 +262,7 @@ public class Ice
                     try {
                         logger.info("Waiting to receive->");
                         wrapper.receive(p);
-                        logger.info("received->"+ new String(p.getData()));
+                        logger.info("received->"+p.getAddress().toString()+":"+p.getPort());
                     } catch (IOException ex) {
                         Logger.getLogger(Ice.class.getName()).log(Level.SEVERE, null, ex);
                     }
@@ -280,6 +285,18 @@ public class Ice
     static void transferRemoteCandidates(Agent localAgent,
                                                  Agent remotePeer)
     {
+        try {
+            String localSDP = SdpUtils.createSDPDescription(localAgent);
+            String remoteSDP = SdpUtils.createSDPDescription(remotePeer);
+            logger.info("localSDP:"+localSDP);
+            logger.info("RemoteSDP:"+remoteSDP);
+//           SdpUtils.parseSDP(localAgent, remoteSDP);
+//           SdpUtils.parseSDP(remotePeer, localSDP);
+        } catch (Throwable ex) {
+            Logger.getLogger(Ice.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+        
         List<IceMediaStream> streams = localAgent.getStreams();
 
         for(IceMediaStream localStream : streams)
@@ -341,6 +358,9 @@ public class Ice
 
         for(Candidate<?> rCand : remoteCandidates)
         {
+            logger.info("candidates########################"+ rCand.getTransportAddress().toString()+" "+ rCand.getType().toString());
+            
+            if(rCand.getType().toString().equals("relay"))
             localComponent.addRemoteCandidate(
                     new RemoteCandidate(
                             rCand.getTransportAddress(),
@@ -417,13 +437,13 @@ public class Ice
         if(harvesters == null)
         {
             // STUN
-//            StunCandidateHarvester stunHarv = new StunCandidateHarvester(
-//                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
-//            StunCandidateHarvester stun6Harv = new StunCandidateHarvester(
-//                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
+            StunCandidateHarvester stunHarv = new StunCandidateHarvester(
+                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
+            StunCandidateHarvester stun6Harv = new StunCandidateHarvester(
+                new TransportAddress("35.193.188.252", 3478, Transport.UDP));
 
-//            agent.addCandidateHarvester(stunHarv);
-//            agent.addCandidateHarvester(stun6Harv);
+            agent.addCandidateHarvester(stunHarv);
+            agent.addCandidateHarvester(stun6Harv);
 
             // TURN
             String[] hostnames = new String[]
@@ -434,7 +454,7 @@ public class Ice
                                  };
             int port = 3478;
             LongTermCredential longTermCredential
-                = new LongTermCredential("ruhul1", "123456");
+                = new LongTermCredential("asdf", "123456");
 
             for (String hostname : hostnames)
                 agent.addCandidateHarvester(
@@ -457,7 +477,7 @@ public class Ice
 
         //STREAMS
         createStream(rtpPort, "audio", agent);
-        createStream(rtpPort + 2, "video", agent);
+//        createStream(rtpPort + 2, "video", agent);
 
 
         long endTime = System.currentTimeMillis();

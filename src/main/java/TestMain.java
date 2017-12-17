@@ -1,13 +1,14 @@
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.net.InetAddress;
-import org.ice4j.Transport;
-import org.ice4j.TransportAddress;
-import org.ice4j.ice.Agent;
-import org.ice4j.ice.IceMediaStream;
-import org.ice4j.ice.harvest.TurnCandidateHarvester;
-import org.ice4j.ice.harvest.UPNPHarvester;
-import org.ice4j.security.LongTermCredential;
+import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.ice4j.channel.DataChannel;
+import org.ice4j.channel.EventListener;
+import org.ice4j.channel.Transporter;
 
 /*
  * Copyright 2017 ruhul.
@@ -33,33 +34,80 @@ public class TestMain {
     public TestMain() {
     }
 
-    public static void main(String[] args) throws IllegalArgumentException, IOException {
-        Agent agent = new Agent(); // A simple ICE Agent
-        String[] hostnames = new String[]{
-            "35.193.188.252"
-        };
-        int port = 3478;
-        LongTermCredential longTermCredential
-                = new LongTermCredential("ruhul1", "123456");
+    public static byte[] getRandomBytes(int client) {
+        Random rand = new Random(System.currentTimeMillis());
+        String str = client + " <> "+rand.nextInt(1000) + ":abcdefgh";
+        return str.getBytes();
+    }
 
-        for (String hostname : hostnames) {
-            agent.addCandidateHarvester(
-                    new TurnCandidateHarvester(
-                            new TransportAddress(
-                                    hostname, port, Transport.UDP),
-                            longTermCredential));
+    static String readSDP() throws Throwable {
+        System.out.println("Paste remote SDP here. Enter an empty "
+                + "line to proceed:");
+        System.out.println("(we don't mind the [java] prefix in SDP intput)");
+        BufferedReader reader
+                = new BufferedReader(new InputStreamReader(System.in));
+
+        StringBuffer buff = new StringBuffer();
+        String line;
+
+        while ((line = reader.readLine()) != null) {
+            line = line.replace("[java]", "");
+            line = line.trim();
+            if (line.length() == 0) {
+                break;
+            }
+
+            buff.append(line);
+            buff.append("\r\n");
         }
 
-        //UPnP: adding an UPnP harvester because they are generally slow
-        //which makes it more convenient to test things like trickle.
-        agent.addCandidateHarvester(new UPNPHarvester());
-        
-        
-        IceMediaStream stream = agent.createMediaStream("audio");
-        port = 5000; // Choose any port
-        agent.createComponent(stream, Transport.UDP, port, port, port+100);
-        
-        
-
+        return buff.toString();
     }
+
+    public static void main(String[] args) throws Throwable {        
+        Random rand = new Random(System.currentTimeMillis());
+        final int client = rand.nextInt();
+        System.out.println("This client-> "+client);
+                
+        Transporter t = new Transporter(Arrays.asList("audio"), null, new EventListener() {
+            boolean state = true;
+
+            @Override
+            public void onSuccess(final DataChannel channel) {
+                System.out.println("##############################On success########################");
+                Thread t = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        while (state) {
+                            try {
+                                
+                                channel.send(getRandomBytes(client));
+                                byte[] bytes = channel.receive();
+//                                System.out.println("Received---> " + new String(bytes));
+                                Thread.sleep(1000);
+                            } catch (IOException ex) {
+                                Logger.getLogger(Transporter.class.getName()).log(Level.SEVERE, null, ex);
+                            } catch (InterruptedException ex) {
+                                Logger.getLogger(Transporter.class.getName()).log(Level.SEVERE, null, ex);
+                            }
+                        }
+                    }
+                });
+                t.start();
+            }
+
+            @Override
+            public void onFail() {
+                state = false;
+                System.out.println("Failed:");
+                //      System.exit(0);
+            }
+        });
+
+        String localSDP = t.getSDP();
+        System.out.println("LocalSDP:\n" + localSDP);
+        t.setRemoteSDP(readSDP());
+        t.startConnectivity();
+    }
+
 }
